@@ -1,0 +1,495 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+  <head>
+   <!-- copyright 2011 john saylor, distributed under the terms of the GNU General Public License -->
+
+    <title>l6</title>
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.5/jquery.min.js"></script>
+    
+    <!-- script and style included inline for easier maintenance -->
+    <script type="text/javascript">
+      var l6 = {
+
+	// where to search
+	tw_url : 'http://search.twitter.com/search.json?callback=?',
+	
+	// how far away from the matching word do we look for a result
+	tw_offset : 6,
+	
+	// no words shorter than this will be returned
+	tw_word_length_min : 6,
+
+        tw_fields : [ 'q', 'page', 'rpp' ],
+        tw_params : {
+          // default search
+          q : 'poetry',
+	  page : 1,
+	  rpp : 60,
+        },
+	
+        sections : {
+	  math : {
+	    element : 'num',
+	    validate : function( v ) {
+	      // nothing selected
+	      if( ! v ) { v = 'vapidly'; }
+	      return v;
+	    }
+	  },
+	  literature : {
+	    element : 'wrd',
+	    validate : function( v ) {
+	      // nothing entered
+	      if( ( ! v ) || ( v.length < 1 ) ) {
+	        v = 'blank';
+	      }
+	      var alphanumeric = /^\w+$/;
+	      if( alphanumeric.test( v ) ) {
+	        return v;
+	      }
+	      return false;
+	    },
+	    err : 'please only use alphabet characters and integers.'
+	  },
+	  limits : {
+	    element : 'min'
+	  }
+	},
+        
+	card_classes : [
+          'auyt',
+	  'lbtk',
+	  'wfts',
+          'otr',
+	  'gyg',
+	  'gh'
+	],
+
+        potentialities : [],
+	question_divs : [ 'math', 'literature', 'limits' ],
+	unanswered_divs : [],
+	current_div : '',
+
+
+        clear : function() {
+	  $( '#fl6' ).find( ':input' ).each( function() {
+	    switch( this.type ) {
+	      case 'radio':
+	        this.checked = false;
+		break;
+	      case 'select-one':
+	      case 'text':
+	        $( this ).val( '' );
+	    }
+	  });
+
+	  for( i = 0; i < l6.question_divs.length; i++ ) {
+	    selector = '#' + l6.question_divs[ i ] + '_next';
+	    $( selector ).unbind( 'click' );
+	  }
+	  
+	  // clear styles
+	  $( 'body' ).removeClass();
+	  $( 'h1' ).removeClass();
+	  $( '#output' ).removeClass();
+
+	  l6.potentialities = [];
+	  l6.unanswered_divs = [];
+	  l6.current_div = '';
+          l6.tw_params[ 'q' ] = 'poetry';
+	},
+
+        // populate l6.potentialities, populate l6.unanswered_divs, attach handlers to buttons, populate divs2hide
+        init : function() {
+	  
+	  // 'original' one word poem of le lionnaise
+	  l6.potentialities.push( 'fennel' );
+	  
+	  // on click handlers for 'next' buttons
+	  var i;
+	  var selector;
+	  for( i = 0; i < l6.question_divs.length; i++ ) {
+	    l6.unanswered_divs.push( l6.question_divs[ i ] );
+	    selector = '#' + l6.question_divs[ i ] + '_next';
+	    var f_ref = eval( 'l6.' + l6.question_divs[ i ] + '_nn' );
+	    $( selector ).click( f_ref );
+	  }
+          
+	  // on click handlers for 'submit' and 'reset'
+	  $( '#sbm' ).click( function() { return l6.generate_poem(); } );
+	  $( '#rst' ).click( l6.clear_and_init );
+
+
+	  // hide all l6.question_divs, controls, poem
+          var divs2hide = l6.question_divs.concat( [ 'controls', 'poem' ] );
+	  for( i = 0; i < divs2hide.length; i++ ) {
+	    selector = '#' + divs2hide[ i ];
+	    $( selector ).addClass( 'hide' );
+	  }
+
+	  // shuffle
+	  l6.fisher_yates( l6.question_divs );
+	  
+	  // FIXME: there's a better js random number generator out there than the default one
+	  var rnd = Math.random();
+	  i = Math.floor( rnd * l6.question_divs.length );
+	  l6.current_div = l6.question_divs[ i ];
+	      
+	  // show it
+	  selector = '#' + l6.current_div;
+	  $( selector ).removeClass( 'hide' );
+  
+	  return true;
+	},
+
+
+	// convenience [not actually sure why there are 2 functions, but ...
+	clear_and_init : function() {
+	  l6.clear();
+	  l6.init();
+	},
+	
+
+	// validates input
+	// populates l6.potentialities
+	navigate_next : function( id ) {
+	  
+	  var selector;
+	  
+	  // radio buttons ...
+	  if( id == 'math' ) {
+	    selector = 'input[name=num]:checked'
+	  }
+          else {
+            selector = '#' + l6.sections[id]['element'];
+	  }
+
+          var raw = $( selector ).val();
+          var validated = raw;
+	  if( l6.sections[ id ][ 'validate' ] ) {
+	    validated = l6.sections[ id ][ 'validate' ]( raw );
+	  }
+          
+          if( ! validated ) {
+	    selector = '#' + l6.sections[ id ][ 'element' ] + '_err';
+	    $( selector ).html( '<br />' + l6.sections[ id ][ 'err' ] );
+	    return false;
+	  }
+
+	  // populate l6.potentialities
+	  l6.potentialities.push( validated );
+          
+	  // send out to the network for more words
+	  var tw_words = l6.get_twitter_words( validated );
+
+	  // remove from unanswered_divs
+	  var i;
+	  for( i = 0; i < l6.unanswered_divs.length; i++ ) {
+	    
+	    if( l6.unanswered_divs[ i ] == id ) {
+	      l6.unanswered_divs.splice( i, 1 );
+	      break;
+	    }
+	  }
+
+	  // hide this div and intro [if needed]
+	  selector = '#' + id;
+	  $( selector ).addClass( 'hide' );
+	  if( ! $( '#intro' ).attr( 'class' ) ) {
+	    $( '#intro' ).addClass( 'hide' );
+	  }
+
+	  // select next div from unanswered or go to controls
+	  if( l6.unanswered_divs.length > 0 ) {
+	    i = Math.floor( Math.random() * l6.unanswered_divs.length );
+	    l6.current_div = l6.unanswered_divs[ i ];
+	  }
+	  else {
+	    l6.current_div = 'controls';
+          }
+	  
+	  selector = '#' + l6.current_div;
+	  $( selector ).removeClass( 'hide' );
+
+	  return true;
+	},
+
+
+        // 'named' functions [instead of passing args] so they can be easily attached to HTML buttons
+        math_nn : function() { l6.navigate_next( 'math' ); },
+        literature_nn : function() { l6.navigate_next( 'literature' ); },
+        limits_nn : function() { l6.navigate_next( 'limits' ); },
+
+
+        // no validation of search_term here, do that earlier
+	get_twitter_words : function( search_term ) {
+	   
+	  if( search_term ) {
+	    l6.tw_params[ 'q' ] = search_term;
+          }
+	  
+	  $.getJSON( l6.tw_url, l6.tw_params, l6.save_twitter_words );
+	},
+
+
+        save_twitter_words : function( json, textStatus ) {
+
+	  var i, j;
+          var words = [];
+	  var alphanumeric = /^\w+$/;
+  	  if( json.results ) {
+  	    for( i = 0; i < json.results.length; i++ ) {
+  	      var tw_array = json.results[ i ].text.split( ' ' );
+	      var counter = 0;
+  	      for( j = 0; j < tw_array.length; j++ ) {
+	        if( tw_array[ j ] == l6.tw_params[ 'q' ] ) {
+		  var idx = j + l6.tw_offset;
+		  if( ( tw_array[ idx ] ) && ( tw_array[ idx ].length >= l6.tw_word_length_min ) && ( alphanumeric.test( tw_array[ idx ] ) ) ) {
+		    words.push( tw_array[ idx ] );
+		  }
+		  break;
+	        }
+	      }
+	    }
+  	  }
+          
+	  for( i = 0; i < words.length; i++ ) {
+	    l6.potentialities.push( words[i] );
+	  }
+        },
+
+
+        // from http://sedition.com/perl/javascript-fy.html
+	// variables renamed
+        fisher_yates : function( a ) {
+
+          var idx0 = a.length;
+          if( ( ! idx0 ) || ( idx0 == 0 ) ) {
+	    return false;
+          }
+
+	  while( --idx0 ) {
+            // FIXME: better random numbers
+	    var rnd = Math.random();
+	    var idx1 = Math.floor( rnd * ( idx0 + 1 ) );
+	    if( idx0 == idx1 ) {
+	      continue;
+	    }
+
+	    var val0 = a[ idx0 ];
+            var val1 = a[ idx1 ];
+            a[ idx0 ] = val1;
+            a[ idx1 ] = val0;
+          }
+        },
+
+
+	generate_poem : function() {
+          
+	  // hide everything
+	  var divs2hide = l6.question_divs.concat( [ 'controls', 'poem' ] );
+	  var i;
+	  var selector;
+	  for( i = 0; i < divs2hide.length; i++ ) {
+	    selector = '#' + divs2hide[ i ];
+	    $( selector ).removeClass();
+	    $( selector ).addClass( 'hide' );
+	  }
+	  $( 'h1' ).addClass( 'hide' );
+	  
+          l6.fisher_yates( l6.potentialities );
+
+	  // FIXME: better random numbers
+	  var rnd = Math.random();
+	  var idx = Math.floor( rnd * ( l6.potentialities.length + 1 ) );
+          
+	  $( '#poem' ).removeClass();
+	  $( '#output' ).text( l6.potentialities[ idx ].toLowerCase() );
+          
+          l6.fisher_yates( l6.card_classes );  	  
+          
+	  // FIXME: better random numbers
+	  var rnd = Math.random();
+	  i = Math.floor( rnd * l6.card_classes.length );
+	  $( '#output' ).addClass( l6.card_classes[ i ] );
+
+	  // nowhere to submit
+	  return false;	 
+	}
+      };
+
+      // initialize page on load
+      $( window ).load( l6.clear_and_init );
+    </script>
+
+
+    <!-- font stacks from m.tuck: http://www.sitepoint.com/eight-definitive-font-stacks/ -->
+    <style type="text/css">
+      @import url(http://fonts.googleapis.com/css?family=Annie+Use+Your+Telescope|Loved+by+the+King|Waiting+for+the+Sunrise|Over+the+Rainbow|Give+You+Glory|Gloria+Hallelujah);
+      .hide { display: none; }
+      .err { color : red; }
+      body { 
+	font-family: "Palatino Linotype", Palatino, Palladio, "URW Palladio L", "Book Antiqua", Baskerville, "Bookman Old Style", "Bitstream Charter", "Nimbus Roman No9 L", Garamond, "Apple Garamond", "ITC Garamond Narrow", "New Century Schoolbook", "Century Schoolbook", "Century Schoolbook L", Georgia, serif;
+	width: 666px;
+	margin-left: auto;
+	margin-right: auto;
+	color: black;
+      }
+      h1 {
+        font-family: Corbel, "Lucida Grande", "Lucida Sans Unicode", "Lucida Sans", "DejaVu Sans", "Bitstream Vera Sans", "Liberation Sans", Verdana, "Verdana Ref", sans-serif;
+        padding: 18px 0px;
+      }
+      label, p.pseudo_label {
+        color: maroon;
+      }
+      div#intro p { margin-bottom: 30px; }
+      h1, div#math, div#literature, div#limits, div#controls, div#poem {
+        text-align: center;
+      }
+      div#math ul li { 
+        list-style: none;
+	text-align: left;
+	padding: 0px 36%;
+      }
+      div#math ul li label { 
+	color: black;
+      }
+      div#literature p#narrative {
+        text-indent: 0px;
+	text-align: justify;
+	padding: 0px 12%;
+      }
+      button, div#controls p input {
+        font-size: x-small;
+	margin: 6px;
+	padding: 6px;
+	border: 1px solid black;
+      }
+      button:hover, div#controls p input:hover {
+	color: maroon;
+	border-color: maroon;
+	background-color: silver;
+	cursor: pointer;
+      }
+      div#poem {
+	margin-top: 12%;
+	margin-right: auto;
+	margin-left: auto;
+      }
+      div#shadow {
+        background-color: gray;
+	width: 432px;
+	padding: 12px;
+        margin: 24px 0 24px 36px
+      }
+      div#card {
+        font-size: xx-large;
+	color: white;
+	background-color: black;
+	border: solid silver 0.6px;
+	width: 336px;
+	padding: 60px;
+        margin: -24px 0 0 -24px
+      }
+      
+      a.auyt {
+        font-family: 'Annie Use Your Telescope', cursive;
+      }
+      a.lbtk {
+        font-family: 'Loved by the King', cursive;
+      }
+      a.wfts { 
+        font-family: 'Waiting for the Sunrise', cursive;
+      }
+      a.otr {
+        font-family: 'Over the Rainbow', cursive;
+      }
+      a.gyg {
+        font-family: 'Give You Glory', cursive;
+      }
+      a.gh {
+        font-family: 'Gloria Hallelujah', cursive;
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <h1>LaudatoryLeLionnaisLonelyLunaticLyric</h1>
+
+    <div id="intro">
+      <p>This web form is a realization of some ideas computed by my mind via
+      my exposure to the 
+      <a href="http://en.wikipedia.org/wiki/Oulipo">OULIPO</a> and one of its
+      founding members, Frani&ccedil;oise Le Lionnais. Among his concerns were
+      artistic limits, and specifically, the one word poem. This idea, along
+      with my own interest in generative art forms, lead to this web page.</p> 
+    </div>
+
+    <form action="#output" method="post" name="fl6" id="fl6" >
+      
+      <div id="math">
+        <p class="pseudo_label">Assign a value to <em>x</em>:</p>
+        
+	<ul>
+	  <!-- no selection: "vapidly" -->
+          <li><input type="radio" name="num" id="num0" value="negatively" /> <label for="num0">-666</label></li>
+	  <li><input type="radio" name="num" id="num1" value="supposedly" /> <label for="num1">&radic;-2</label></li>
+          <li><input type="radio" name="num" id="num2" value="mistakenly" /> <label for="num2">1 / 0</label></li>
+          <li><input type="radio" name="num" id="num3" value="irrationally" /> <label for="num3">&pi;</label></li>
+          <li><input type="radio" name="num" id="num4" value="uniquely" /> <label for="num4">17</label></li>
+	</ul>
+
+	<p><button type="button" name="math_next" id="math_next">next</button></p>
+      </div>
+
+      <div id="literature">
+        <p><label for="wrd">Complete the sentence:</label></p>
+       
+        <p id="narrative">
+	  <em>One day at about midday in the Parc Monceau district, on the back
+	  platform of a more or less full S bus (now No. 84), I observed a
+	  person with a very long neck who was wearing a felt hat which had a[n]
+	  <!-- plaited --><input name="wrd" id="wrd" value="" size="6" maxlength="12" />
+	  cord round it instead of a ribbon.</em><br />
+	  <span id="wrd_err" class="err"></span>
+	</p>
+      
+        <p><button type="button" name="literature_next" id="literature_next">next</button></p>
+      </div>
+
+      <div id="limits">
+        <p><label for="lmt">Set your limit:</label></p>
+
+	<p>
+	  <select name="min" id="min">
+            <option value="none" selected="selected"></option>
+	    <option>most</option>
+	    <option>lots</option>
+	    <option>some</option>
+	    <option>few</option>
+	    <option>one</option>
+	  </select>
+	</p>
+      
+        <p><button type="button" name="limits_next" id="limits_next">next</button></p>
+      </div>
+
+      <div id="controls">
+        <p>
+          <input type="submit" name="sbm" id="sbm" value="generate poem" />
+	  <input type="reset" name="rst" id="rst" value="do over" />
+        </p>
+      </div>	
+    </form>  
+  
+    <div id="poem">
+      <div id="shadow">
+        <div id="card">
+          <a name="output" id="output"></a>
+        </div>
+      </div>
+    </div>  
+
+  </body>
+</html>
